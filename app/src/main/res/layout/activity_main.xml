@@ -36,6 +36,18 @@
                 android:layout_height="wrap_content"
                 android:text="Start Server" />
 
+            <TextView
+                android:id="@+id/txtCallStatus"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textAlignment="center" />
+
+            <Button
+                android:id="@+id/checkbtn"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Check call status" />
+
         </LinearLayout>
     </LinearLayout>
 
