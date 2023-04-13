@@ -3,9 +3,7 @@ package com.daniel.freepbx001
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.*
-import android.content.pm.PackageManager
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
 import android.provider.ContactsContract
 import android.provider.ContactsContract.CommonDataKinds
@@ -69,7 +67,7 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
             }
-        //register listener
+            //register listener
             telephonyManager.listen(phoneStateListener, PhoneStateListener.LISTEN_CALL_STATE);
             statusCall.text = telephonyManager.callState.toString()
         }
@@ -202,37 +200,6 @@ class MainActivity : AppCompatActivity() {
 
                     Log.d("bingo", jsonObject.toString())
                     val responseObj = JSONObject()
-//                    responseObj.put("emulatorCallState", "")
-//                    responseObj.put("isWhatsappRegistered", false)
-//                    responseObj.put("isAddedToContactList", false)
-                    Log.d("bingo", "here2")
-                    //check if phone number has whatsapp account
-//                    if (isWhatsAppNumberRegistered(phone)) {
-//                        responseObj.put("isWhatsappRegistered", true)
-//                        Log.d("bingo", "here4")
-//                        val callState = telephonyManager.callState
-//                        if (callState == TelephonyManager.CALL_STATE_IDLE) {
-//                            // initiate whatsapp call
-//                            responseObj.put("emulatorCallState", "idle")
-//                            Log.d("bingo", "here5")
-//                        }
-//                        else if (callState == TelephonyManager.CALL_STATE_RINGING) {
-//                            // initiate whatsapp call
-//                            responseObj.put("emulatorCallState", "ringing")
-//                            Log.d("bingo", "here6")
-//                        }
-//                        else {
-//                            // Device is busy
-//                            responseObj.put("emulatorCallState", "busy")
-//                            Log.d("bingo", "here7")
-//                        }
-//                    }
-//                    else {
-//                        // not registered number
-//                        responseObj.put("isWhatsappRegistered", false)
-//                        Log.d("bingo", "here3")
-//                    }
-
                     // add contact list
                     if (addPhoneNumberToContact(this, name, phone)) {
                         responseObj.put("isAddedToContactList", true)
@@ -259,40 +226,37 @@ class MainActivity : AppCompatActivity() {
 //            fallbackIntent.data = Uri.parse("http://www.whatsapp.com")
 //            context.startActivity(fallbackIntent)
 //        }
-        val mimeString = "vnd.android.cursor.item/vnd.com.whatsapp.voip.call"
-        var _id : Long
-        val resolver = getApplicationContext().getContentResolver();
-        var cursor = resolver.query(
+
+//        val intent = Intent()
+//        intent.action = Intent.ACTION_VIEW
+//        intent.setDataAndType(
+//            Uri.parse("content://com.android.contacts/data/9"),
+//            "vnd.android.cursor.item/vnd.com.whatsapp.voip.call"
+//        )
+//        intent.setPackage("com.whatsapp")
+//        startActivity(intent)
+
+        val resolver = context.contentResolver
+        val cursor = resolver.query(
             ContactsContract.Data.CONTENT_URI,
-            null,
-            null,
-            null,
+            null, null, null,
             ContactsContract.Contacts.DISPLAY_NAME
-        );
-        while (cursor!!.moveToNext()) {
-            _id = cursor.getLong(cursor.getColumnIndex(ContactsContract.Data._ID));
-            val displayName = cursor.getString(cursor.getColumnIndex(ContactsContract.Data.DISPLAY_NAME));
-            val mimeType = cursor.getString(cursor.getColumnIndex(ContactsContract.Data.MIMETYPE));
+        )
 
-            Log.d("Data", _id.toString() + " "+ displayName + " " + mimeType );
-
-//            if (displayName.equals(name)) {
-                if (mimeType.equals(mimeString)) {
-                    Log.d("Data", "called")
-                    val data = "content://com.android.contacts/data/" + _id;
-                    val sendIntent = Intent();
-                    sendIntent.setAction(Intent.ACTION_VIEW);
-                    sendIntent.setDataAndType(Uri.parse(data), mimeString);
-                    sendIntent.setPackage("com.whatsapp");
-                    startActivity(sendIntent);
-                }
-//            }
+        if (cursor != null) {
+            while (cursor.moveToNext()) {
+                val _id: Long = cursor.getLong(cursor.getColumnIndex(ContactsContract.Data._ID))
+                val displayName: String =
+                    cursor.getString(cursor.getColumnIndex(ContactsContract.Data.DISPLAY_NAME))
+                val mimeType: String =
+                    cursor.getString(cursor.getColumnIndex(ContactsContract.Data.MIMETYPE))
+                Log.d("Data", "$_id $displayName $mimeType")
+            }
         }
     }
 
 
     fun addPhoneNumberToContact(context: Context, contactName: String, phoneNumber: String): Boolean {
-        // Define the raw contact insertion operation
         val ops: ArrayList<ContentProviderOperation> = ArrayList()
         ops.add(ContentProviderOperation.newInsert(ContactsContract.RawContacts.CONTENT_URI)
             .withValue(ContactsContract.RawContacts.ACCOUNT_TYPE, null)
@@ -306,10 +270,13 @@ class MainActivity : AppCompatActivity() {
             .withValue(CommonDataKinds.StructuredName.DISPLAY_NAME, contactName)
             .build())
 
-        // Define the phone number insertion operation
+        // Define the phone number insertion operation with WhatsApp MIME type
         ops.add(ContentProviderOperation.newInsert(ContactsContract.Data.CONTENT_URI)
             .withValueBackReference(ContactsContract.Data.RAW_CONTACT_ID, 0)
-            .withValue(ContactsContract.Data.MIMETYPE, ContactsContract.CommonDataKinds.Phone.CONTENT_ITEM_TYPE)
+//            .withValue(ContactsContract.Data.MIMETYPE, "vnd.android.cursor.item/vnd.com.whatsapp.profile")
+//            .withValue(ContactsContract.Data.MIMETYPE, "vnd.android.cursor.item/vnd.org.telegram.messenger.android.profile")
+            .withValue(ContactsContract.Data.MIMETYPE, CommonDataKinds.Phone.CONTENT_ITEM_TYPE)
+//            .withValue(ContactsContract.Data.MIMETYPE, CommonDataKinds.Phone.TYPE_MOBILE)
             .withValue(CommonDataKinds.Phone.NUMBER, phoneNumber)
             .withValue(CommonDataKinds.Phone.TYPE, CommonDataKinds.Phone.TYPE_MOBILE)
             .build())
