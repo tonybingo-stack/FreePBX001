@@ -1,6 +1,8 @@
 package com.daniel.freepbx001
 
 import android.Manifest
+import android.accounts.Account
+import android.accounts.AccountManager
 import android.annotation.SuppressLint
 import android.content.*
 import android.net.Uri
@@ -25,17 +27,29 @@ import java.util.*
 import java.util.concurrent.Executors
 
 
+// Constants
+// The authority for the sync adapter's content provider
+const val AUTHORITY = "com.daniel.freepbx001.provider"
+//
+// An account type, in the form of a domain name
+const val ACCOUNT_TYPE = "daniel.com"
+// The account name
+const val ACCOUNT = "placeholderaccount"
 class MainActivity : AppCompatActivity() {
     private var serverUp = false
     // Request code for READ_CONTACTS. It can be any number > 0.
     private val REQUEST_CODE = 100
+    private val REQUEST_CODE_FOR_CALL = 1001
+    // Instance fields
+    private lateinit var mAccount: Account
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
         // get reference to button
-
+        // Create the placeholder account
+        mAccount = createSyncAccount()
         var btn_start = findViewById(R.id.startbtn) as Button
         var label = findViewById(R.id.number) as TextView
         label.text = "Server is offline"
@@ -70,21 +84,48 @@ class MainActivity : AppCompatActivity() {
             //register listener
             telephonyManager.listen(phoneStateListener, PhoneStateListener.LISTEN_CALL_STATE);
             statusCall.text = telephonyManager.callState.toString()
+//            initiateWhatsAppCall(this, "+58 414 3985503")
+//            endWhatsAppCall()
         }
         // Check the SDK version and whether the permission is already granted or not.
         val permissions = arrayOf(
             Manifest.permission.READ_CONTACTS,
-            Manifest.permission.READ_PHONE_STATE
+            Manifest.permission.READ_PHONE_STATE,
+            Manifest.permission.INTERNET,
+            Manifest.permission.WRITE_CONTACTS,
+            Manifest.permission.CALL_PHONE,
+            Manifest.permission.READ_SYNC_SETTINGS,
+            Manifest.permission.WRITE_SYNC_SETTINGS
         )
 
         requestPermissions(permissions, REQUEST_CODE)
-
-//        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && checkSelfPermission(Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) {
-//
-//            //After this point you wait for callback in onRequestPermissionsResult(int, String[], int[]) overriden method
-//        }
+//        initiateWhatsAppCall(this, "+1 716 220 8648")
     }
-
+    /**
+     * Create a new placeholder account for the sync adapter
+     */
+    private fun createSyncAccount(): Account {
+        val accountManager = getSystemService(Context.ACCOUNT_SERVICE) as AccountManager
+        return Account(ACCOUNT, ACCOUNT_TYPE).also { newAccount ->
+            /*
+             * Add the account and account type, no password or user data
+             * If successful, return the Account object, otherwise report an error.
+             */
+            if (accountManager.addAccountExplicitly(newAccount, null, null)) {
+                /*
+                 * If you don't set android:syncable="true" in
+                 * in your <provider> element in the manifest,
+                 * then call context.setIsSyncable(account, AUTHORITY, 1)
+                 * here.
+                 */
+            } else {
+                /*
+                 * The account exists or some other error occurred. Log this, report it,
+                 * or handle it internally.
+                 */
+            }
+        }
+    }
 
     private fun streamToString(inputStream: InputStream): String {
         val s = Scanner(inputStream).useDelimiter("\\A")
@@ -108,16 +149,16 @@ class MainActivity : AppCompatActivity() {
             mHttpServer!!.createContext("/", rootHandler)
             mHttpServer!!.createContext("/index", rootHandler)
             // Handle /messages endpoint
-            mHttpServer!!.createContext("/check", messageHandler)
+            mHttpServer!!.createContext("/add", addHandler)
             mHttpServer!!.createContext("/call", callHandler)
+            mHttpServer!!.createContext("/end", endHandler)
 
             mHttpServer!!.start()//startServer server;
             var label = findViewById(R.id.number) as TextView
             label.text = "Server is online"
             var btn_start = findViewById(R.id.startbtn) as Button
             btn_start.text = "Stop Server"
-//            serverTextView.text = getString(R.string.server_running)
-//            serverButton.text = getString(R.string.stop_server)
+
         } catch (e: IOException) {
             e.printStackTrace()
         }
@@ -156,21 +197,30 @@ class MainActivity : AppCompatActivity() {
                 "POST" -> {
                     val inputStream = httpExchange.requestBody
                     val requestBody = streamToString(inputStream)
-                    Log.d("bingo", "here00")
+
                     val jsonObject = JSONObject()
                     val keyValuePairs = requestBody.split("&")
                     for (pair in keyValuePairs) {
                         val (key, value) = pair.split("=")
                         jsonObject.put(key, value)
                     }
-                    Log.d("bingo", "here01")
                     val phone = jsonObject.getString("phoneNumber")
 
-//                    var label = findViewById(R.id.number) as TextView
-//                    label.text = phone
-                    Log.d("bingo", phone)
                     initiateWhatsAppCall(this, phone)
-                    sendResponse(httpExchange, "calling")
+                    sendResponse(httpExchange, "calling...")
+                }
+
+            }
+        }
+    }
+    // Handler for root endpoint
+    private val endHandler = HttpHandler { httpExchange ->
+        run {
+            // Get request method
+            when (httpExchange!!.requestMethod) {
+                "POST" -> {
+                    endWhatsAppCall()
+                    sendResponse(httpExchange, "call ended")
                 }
 
             }
@@ -178,7 +228,7 @@ class MainActivity : AppCompatActivity() {
 
     }
     @SuppressLint("Range")
-    private val messageHandler = HttpHandler { httpExchange ->
+    private val addHandler = HttpHandler { httpExchange ->
         run {
             when (httpExchange!!.requestMethod) {
                 "GET" -> {
@@ -198,18 +248,17 @@ class MainActivity : AppCompatActivity() {
                     val name = jsonObject.getString("name")
                     val phone = jsonObject.getString("phone")
 
-                    Log.d("bingo", jsonObject.toString())
                     val responseObj = JSONObject()
                     // add contact list
-                    if (addPhoneNumberToContact(this, name, phone)) {
+                    if (addPhoneNumberToContact(this, phone, phone)) {
                         responseObj.put("isAddedToContactList", true)
                     }
                     else {
                         responseObj.put("isAddedToContactList", false)
                     }
+                    syncWhatsappContacts()
 
                     sendResponse(httpExchange, responseObj.toString())
-
                 }
             }
         }
@@ -217,25 +266,6 @@ class MainActivity : AppCompatActivity() {
 
     @SuppressLint("Range")
     fun initiateWhatsAppCall(context: Context, phoneNumber: String) {
-//        val intent = Intent(Intent.ACTION_VIEW)
-//        intent.data = Uri.parse("https://api.whatsapp.com/send?phone=$phoneNumber")
-//        try {
-//            context.startActivity(intent)
-//        } catch (e: ActivityNotFoundException) {
-//            val fallbackIntent = Intent(Intent.ACTION_VIEW)
-//            fallbackIntent.data = Uri.parse("http://www.whatsapp.com")
-//            context.startActivity(fallbackIntent)
-//        }
-
-//        val intent = Intent()
-//        intent.action = Intent.ACTION_VIEW
-//        intent.setDataAndType(
-//            Uri.parse("content://com.android.contacts/data/9"),
-//            "vnd.android.cursor.item/vnd.com.whatsapp.voip.call"
-//        )
-//        intent.setPackage("com.whatsapp")
-//        startActivity(intent)
-
         val resolver = context.contentResolver
         val cursor = resolver.query(
             ContactsContract.Data.CONTENT_URI,
@@ -251,10 +281,31 @@ class MainActivity : AppCompatActivity() {
                 val mimeType: String =
                     cursor.getString(cursor.getColumnIndex(ContactsContract.Data.MIMETYPE))
                 Log.d("Data", "$_id $displayName $mimeType")
+
+                //check if name=phone number & mimetype=whatsapp
+                if (displayName == phoneNumber && mimeType == "vnd.android.cursor.item/vnd.com.whatsapp.voip.call") {
+                    //make direct call
+                    val whatsappintent = Intent()
+                    whatsappintent.action = Intent.ACTION_VIEW
+                    whatsappintent.setDataAndType(
+                        Uri.parse("content://com.android.contacts/data/$_id"),
+                        "vnd.android.cursor.item/vnd.com.whatsapp.voip.call"
+                    )
+                    whatsappintent.setPackage("com.whatsapp")
+
+                    startActivityForResult(whatsappintent, REQUEST_CODE_FOR_CALL)
+//                    startActivity(whatsappintent)
+                }
             }
         }
     }
+    fun endWhatsAppCall() {
+        finishActivity(REQUEST_CODE_FOR_CALL)
+//        val disconnectIntent = Intent()
+//        disconnectIntent.action = "com.whatsapp.action.CALL_DISCONNECTED"
+//        sendBroadcast(disconnectIntent)
 
+    }
 
     fun addPhoneNumberToContact(context: Context, contactName: String, phoneNumber: String): Boolean {
         val ops: ArrayList<ContentProviderOperation> = ArrayList()
@@ -273,10 +324,7 @@ class MainActivity : AppCompatActivity() {
         // Define the phone number insertion operation with WhatsApp MIME type
         ops.add(ContentProviderOperation.newInsert(ContactsContract.Data.CONTENT_URI)
             .withValueBackReference(ContactsContract.Data.RAW_CONTACT_ID, 0)
-//            .withValue(ContactsContract.Data.MIMETYPE, "vnd.android.cursor.item/vnd.com.whatsapp.profile")
-//            .withValue(ContactsContract.Data.MIMETYPE, "vnd.android.cursor.item/vnd.org.telegram.messenger.android.profile")
             .withValue(ContactsContract.Data.MIMETYPE, CommonDataKinds.Phone.CONTENT_ITEM_TYPE)
-//            .withValue(ContactsContract.Data.MIMETYPE, CommonDataKinds.Phone.TYPE_MOBILE)
             .withValue(CommonDataKinds.Phone.NUMBER, phoneNumber)
             .withValue(CommonDataKinds.Phone.TYPE, CommonDataKinds.Phone.TYPE_MOBILE)
             .build())
@@ -292,17 +340,17 @@ class MainActivity : AppCompatActivity() {
 
         return true
     }
-    fun isWhatsAppNumberRegistered(phoneNumber: String): Boolean {
-//        val client = OkHttpClient().newBuilder()
-//            .build()
-//        val mediaType = "text/plain".toMediaTypeOrNull()
-//        val body: RequestBody = create(mediaType, "")
-//        val request: Request = Builder()
-//            .url("https://phone.watverifyapi.live/is-whatsapp-no/get?api_key=key&phone=1238893")
-//            .method("POST", body)
-//            .build()
-//        val response = client.newCall(request).execute()
-        return true
+    @SuppressLint("Range")
+    private fun syncWhatsappContacts() {
+        // Pass the settings flags by inserting them in a bundle
+        val settingsBundle = Bundle().apply {
+            putBoolean(ContentResolver.SYNC_EXTRAS_MANUAL, true)
+            putBoolean(ContentResolver.SYNC_EXTRAS_EXPEDITED, true)
+        }
+        /*
+         * Request the sync for the default account, authority, and
+         * manual sync settings
+         */
+        ContentResolver.requestSync(mAccount, AUTHORITY, settingsBundle)
     }
-
 }
