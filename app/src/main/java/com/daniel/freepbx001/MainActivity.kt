@@ -6,6 +6,7 @@ import android.accounts.AccountManager
 import android.annotation.SuppressLint
 import android.content.*
 import android.content.pm.PackageManager
+import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -254,7 +255,8 @@ class MainActivity : AppCompatActivity() {
                         Log.d("BINGO", "here")
                         res = "hey"
                     }
-                    sendResponse(httpExchange, res)
+                    val rr = checkWhatsappCallStats()
+                    sendResponse(httpExchange, rr)
                 }
 
             }
@@ -386,5 +388,23 @@ class MainActivity : AppCompatActivity() {
          * manual sync settings
          */
         ContentResolver.requestSync(mAccount, AUTHORITY, settingsBundle)
+    }
+    fun checkWhatsappCallStats(): String {
+        val am = getSystemService(AUDIO_SERVICE) as AudioManager
+        val mode = am.mode
+        if (AudioManager.MODE_IN_CALL == mode) {
+            // device is in a telephony call
+            return "dialing"
+
+        } else if (AudioManager.MODE_IN_COMMUNICATION == mode) {
+            // device is in communiation mode, i.e. in a VoIP or video call
+            return "calling"
+        } else if (AudioManager.MODE_RINGTONE == mode) {
+            // device is in ringing mode, some incoming is being signalled
+            return "ringing"
+        } else {
+            // device is in normal mode, no incoming and no audio being played
+            return "idle"
+        }
     }
 }
