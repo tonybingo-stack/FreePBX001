@@ -5,7 +5,9 @@ import android.accounts.Account
 import android.accounts.AccountManager
 import android.annotation.SuppressLint
 import android.content.*
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.ContactsContract
 import android.provider.ContactsContract.CommonDataKinds
@@ -15,6 +17,7 @@ import android.util.Log
 import android.widget.Button
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpHandler
 import com.sun.net.httpserver.HttpServer
@@ -37,27 +40,36 @@ const val ACCOUNT_TYPE = "daniel.com"
 const val ACCOUNT = "placeholderaccount"
 class MainActivity : AppCompatActivity() {
     private var serverUp = false
-    // Request code for READ_CONTACTS. It can be any number > 0.
-    private val REQUEST_CODE = 100
+    private val PERMISSION_REQUEST_CODE = 100
     private val REQUEST_CODE_FOR_CALL = 1001
-    // Instance fields
     private lateinit var mAccount: Account
-
+    private val permissions = arrayOf(
+        Manifest.permission.READ_CONTACTS,
+        Manifest.permission.READ_PHONE_STATE,
+        Manifest.permission.INTERNET,
+        Manifest.permission.WRITE_CONTACTS,
+        Manifest.permission.CALL_PHONE,
+        Manifest.permission.READ_SYNC_SETTINGS,
+        Manifest.permission.WRITE_SYNC_SETTINGS
+    )
+    private lateinit var telephonyManager: TelephonyManager
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
         // get reference to button
-        // Create the placeholder account
-        mAccount = createSyncAccount()
+        if (!hasPermissions(this, *permissions)) {
+            ActivityCompat.requestPermissions(this, permissions, PERMISSION_REQUEST_CODE)
+        } else {
+            // Permissions have already been granted
+        }
         var btn_start = findViewById(R.id.startbtn) as Button
         var label = findViewById(R.id.number) as TextView
         label.text = "Server is offline"
 
-        val port = 8000
         btn_start.setOnClickListener {
             serverUp = if(!serverUp){
-                startServer(port)
+                startServer(8001)
                 true
             } else{
                 stopServer()
@@ -71,35 +83,53 @@ class MainActivity : AppCompatActivity() {
         statusCall.text = "Unknown"
 
         btn_check.setOnClickListener {
-            var telephonyManager = getSystemService(TELEPHONY_SERVICE) as TelephonyManager
-            var phoneStateListener: PhoneStateListener = object : PhoneStateListener() {
-                override fun onCallStateChanged(state: Int, incomingNumber: String) {
-                    when (state) {
-                        TelephonyManager.CALL_STATE_IDLE -> {}
-                        TelephonyManager.CALL_STATE_RINGING -> {}
-                        TelephonyManager.CALL_STATE_OFFHOOK -> {}
+            statusCall.text = telephonyManager.callState.toString()
+        }
+
+        telephonyManager = getSystemService(TELEPHONY_SERVICE) as TelephonyManager
+        var phoneStateListener: PhoneStateListener = object : PhoneStateListener() {
+            override fun onCallStateChanged(state: Int, incomingNumber: String) {
+                super.onCallStateChanged(state, incomingNumber)
+                Log.d(state.toString(), incomingNumber)
+                when (state) {
+                    TelephonyManager.CALL_STATE_IDLE -> {
+                        Log.d("BINGO", "IDLE")
+                    }
+                    TelephonyManager.CALL_STATE_RINGING -> {
+                        Log.d("BINGO", "Ringing")
+                    }
+                    TelephonyManager.CALL_STATE_OFFHOOK -> {
+                        Log.d("BINGO", "offhook")
                     }
                 }
             }
-            //register listener
-            telephonyManager.listen(phoneStateListener, PhoneStateListener.LISTEN_CALL_STATE);
-            statusCall.text = telephonyManager.callState.toString()
-//            initiateWhatsAppCall(this, "+58 414 3985503")
-//            endWhatsAppCall()
         }
-        // Check the SDK version and whether the permission is already granted or not.
-        val permissions = arrayOf(
-            Manifest.permission.READ_CONTACTS,
-            Manifest.permission.READ_PHONE_STATE,
-            Manifest.permission.INTERNET,
-            Manifest.permission.WRITE_CONTACTS,
-            Manifest.permission.CALL_PHONE,
-            Manifest.permission.READ_SYNC_SETTINGS,
-            Manifest.permission.WRITE_SYNC_SETTINGS
-        )
-
-        requestPermissions(permissions, REQUEST_CODE)
-//        initiateWhatsAppCall(this, "+1 716 220 8648")
+        //register listener
+        telephonyManager.listen(phoneStateListener, PhoneStateListener.LISTEN_CALL_STATE);
+        // Create the placeholder account
+        mAccount = createSyncAccount()
+    }
+    private fun hasPermissions(context: Context, vararg permissions: String): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && context != null && permissions != null) {
+            for (permission in permissions) {
+                if (ActivityCompat.checkSelfPermission(context, permission) != PackageManager.PERMISSION_GRANTED) {
+                    return false
+                }
+            }
+        }
+        return true
+    }
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        when (requestCode) {
+            PERMISSION_REQUEST_CODE -> {
+                if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                    // Permissions have been granted
+                } else {
+                    // Permissions have been denied
+                }
+            }
+        }
     }
     /**
      * Create a new placeholder account for the sync adapter
@@ -151,7 +181,7 @@ class MainActivity : AppCompatActivity() {
             // Handle /messages endpoint
             mHttpServer!!.createContext("/add", addHandler)
             mHttpServer!!.createContext("/call", callHandler)
-            mHttpServer!!.createContext("/end", endHandler)
+            mHttpServer!!.createContext("/state", stateHandler)
 
             mHttpServer!!.start()//startServer server;
             var label = findViewById(R.id.number) as TextView
@@ -214,13 +244,17 @@ class MainActivity : AppCompatActivity() {
         }
     }
     // Handler for root endpoint
-    private val endHandler = HttpHandler { httpExchange ->
+    private val stateHandler = HttpHandler { httpExchange ->
         run {
             // Get request method
             when (httpExchange!!.requestMethod) {
                 "POST" -> {
-                    endWhatsAppCall()
-                    sendResponse(httpExchange, "call ended")
+                    var res = telephonyManager.callState.toString()
+                    if (res == null) {
+                        Log.d("BINGO", "here")
+                        res = "hey"
+                    }
+                    sendResponse(httpExchange, res)
                 }
 
             }
